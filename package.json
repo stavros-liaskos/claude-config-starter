@@ -1,0 +1,21 @@
+{
+  "name": "claude-config-starter",
+  "version": "1.0.0",
+  "description": "Interactive wizard to scaffold a Claude Code config into any repo.",
+  "type": "module",
+  "bin": {
+    "claude-config-starter": "bin/init.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "bin",
+    "templates"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stavros-liaskos/claude-config-starter.git"
+  }
+}

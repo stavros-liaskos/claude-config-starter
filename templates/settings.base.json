@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git diff *)",
+      "Bash(git status *)",
+      "Bash(git grep *)",
+      "Bash(git fetch *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+
+      "Bash(ls *)",
+      "Bash(echo *)",
+
+      "Bash(npx tsc *)",
+      "Bash(npx vitest *)"
+    ],
+    "deny": [
+      "Read(**/.env*)",
+      "Edit(**/.env*)",
+
+      "Read(**/*.pem)",
+      "Edit(**/*.pem)",
+      "Read(**/*.key)",
+      "Edit(**/*.key)",
+      "Read(**/*.p12)",
+      "Read(**/*.pfx)",
+      "Read(**/id_rsa)",
+      "Read(**/id_ed25519)",
+
+      "Bash(rm -rf *)",
+      "Bash(rm -fr *)",
+
+      "Bash(git reset --hard *)",
+      "Bash(git push --force *)",
+      "Bash(git push -f *)",
+      "Bash(git clean -f*)",
+
+      "Bash(sudo)"
+    ]
+  }
+}

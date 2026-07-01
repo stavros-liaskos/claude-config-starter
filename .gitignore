@@ -1,0 +1,13 @@
+# Machine-specific Claude Code settings — never commit these
+.claude/settings.local.json
+
+# Claude Code worktrees (created on demand)
+.claude/worktrees/
+
+# Dependencies
+node_modules/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
