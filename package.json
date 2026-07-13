@@ -1,6 +1,6 @@
 {
   "name": "claude-config-starter",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Interactive wizard to scaffold a Claude Code config into any repo.",
   "type": "module",
   "bin": {

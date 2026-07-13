@@ -3,7 +3,9 @@
 An interactive wizard that scaffolds a [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
 config into any repo. Run one command inside your project, answer a few questions
 (package manager, backend/frontend, …), and it drops in a tailored `CLAUDE.md`,
-`AGENTS.md`, and `.claude/settings.json`. It **never overwrites** existing files.
+`AGENTS.md`, and `.claude/settings.json`. On a first run it **never overwrites** existing
+files; on later runs it can **update** an existing config to a newer version (see
+[Updating](#updating)).
 
 ## Usage
 
@@ -27,7 +29,7 @@ The wizard asks:
 5. **Skills** — optionally installs skills: asks for a skills source URL (e.g.
    `https://github.com/vercel-labs/skills`) and the skill name(s), then runs `npx skills add`.
 
-Existing files are left untouched; the wizard prints a `created / skipped` summary at the end.
+On a fresh install, existing files are left untouched; the wizard prints a summary at the end.
 
 ## What it generates
 
@@ -37,6 +39,7 @@ AGENTS.md              # the "constitution", pre-filled for your pm + project ty
 skills-lock.json       # tracks installed skills
 .claude/
 ├── settings.json      # permission allow/deny defaults (+ pm rules, + optional hook)
+├── starter.json       # version manifest — records what was installed (see Updating)
 ├── skills/            # shared skills land here
 └── commands/          # project-specific slash commands go here
 ```
@@ -47,6 +50,28 @@ and Copilot read `AGENTS.md` natively.
 
 `.claude/settings.local.json` is **not** generated — it's machine-specific, gitignored, and
 accumulates your personal allow-list as you work. Never commit it.
+
+## Updating
+
+Re-run the same command in a repo that already has the config, and the wizard detects what's
+there via `.claude/starter.json` (a manifest holding the installed version, your answers, and
+a hash of every generated file) and acts accordingly:
+
+- **Already current** → only creates anything missing; nothing is overwritten.
+- **Older version** → asks whether to update, then reconciles each file by class:
+
+| File class | Files | On update |
+|---|---|---|
+| **Managed** | `CLAUDE.md`, IDSD commands/skills | If you never touched it → updated in place. If you edited it *and* the template changed → your copy is saved to `<file>.bak` and you're asked keep-mine / take-new, one file at a time. If the template didn't change → left alone. |
+| **User-owned** | `AGENTS.md`, `skills-lock.json` | Never overwritten. If the template changed, it's listed under **Review** so you can merge by hand. |
+| **settings.json** | `.claude/settings.json` | **Additive merge** — new `allow`/`deny` entries from the template (e.g. security fixes) are added; everything you added is kept; nothing is removed. |
+
+- **No manifest but config present** (installed before versioning) → the wizard records a
+  baseline manifest so future updates are tracked, and merges in any missing defaults.
+
+The manifest is meant to be committed. Delete leftover `*.bak` files once you've reconciled them.
+
+The version comes from this package's `package.json`; bump it whenever you change a template.
 
 ## Permissions
 
