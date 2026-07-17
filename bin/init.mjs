@@ -62,17 +62,92 @@ const runScript = (pm, s) => (pm === 'npm' ? `npm run ${s}` : `${pm} ${s}`);
 const installCmd = (pm) => (pm === 'npm' ? 'npm install' : `${pm} install`);
 
 function pmAllow(pm) {
+  // The script-runner patterns (lint/test/build) omit the space before `*` on
+  // purpose: a trailing space enforces a word boundary, so `Bash(yarn lint *)`
+  // would allow `yarn lint --fix` but NOT the colon form `yarn lint:knip`.
+  // `Bash(yarn lint*)` covers the bare command, `--flag` args, and `:sub` scripts.
   if (pm === 'yarn')
-    return ['Bash(yarn install *)', 'Bash(yarn lint *)', 'Bash(yarn test *)', 'Bash(yarn build *)', 'Bash(yarn tsc *)'];
+    return ['Bash(yarn install *)', 'Bash(yarn lint*)', 'Bash(yarn test*)', 'Bash(yarn build*)', 'Bash(yarn tsc *)'];
   if (pm === 'pnpm')
-    return ['Bash(pnpm install *)', 'Bash(pnpm lint *)', 'Bash(pnpm test *)', 'Bash(pnpm build *)', 'Bash(pnpm exec *)'];
+    return ['Bash(pnpm install *)', 'Bash(pnpm lint*)', 'Bash(pnpm test*)', 'Bash(pnpm build*)', 'Bash(pnpm exec *)'];
   return ['Bash(npm install *)', 'Bash(npm run *)', 'Bash(npx *)'];
+}
+
+// Chrome DevTools MCP tools worth allowing for projects with a UI — the common
+// navigate / inspect / interact loop. Only added for frontend (and monorepo) kinds.
+const CHROME_MCP = 'mcp__plugin_chrome-devtools-mcp_chrome-devtools';
+function frontendAllow(kind) {
+  if (kind !== 'frontend' && kind !== 'both') return [];
+  return ['navigate_page', 'take_screenshot', 'take_snapshot', 'click', 'fill', 'wait_for']
+    .map((t) => `${CHROME_MCP}__${t}`);
+}
+
+// ---------- permission de-duplication ----------
+// A permission rule is either `Tool(body)` (e.g. `Bash(yarn lint*)`) or a bare
+// MCP token. Only a `Tool(body)` whose body ends in `*` acts as a prefix
+// wildcard; every other rule matches literally.
+function parseRule(rule) {
+  const m = /^([A-Za-z]+)\((.*)\)$/.exec(rule);
+  return m ? { tool: m[1], body: m[2] } : null;
+}
+
+// True when every command `narrow` permits is also permitted by `broad`, so
+// keeping `broad` alone loses nothing. `Bash(yarn lint*)` subsumes the space
+// form `Bash(yarn lint *)`, the colon form `Bash(yarn lint:knip)`, and so on.
+function subsumes(broad, narrow) {
+  if (broad === narrow) return true;
+  const B = parseRule(broad);
+  const N = parseRule(narrow);
+  if (!B || !N || B.tool !== N.tool || !B.body.endsWith('*')) return false;
+  const bp = B.body.slice(0, -1); // broad's literal prefix
+  const np = N.body.endsWith('*') ? N.body.slice(0, -1) : N.body;
+  return np.startsWith(bp);
+}
+
+// Collapse a permission list: drop exact duplicates and any rule another rule
+// already covers, keeping the broadest rule in the earliest slot it appeared.
+// Stable — a list with no redundancy comes back unchanged, so re-runs are no-ops.
+function collapse(list = []) {
+  const out = [];
+  for (const x of list) {
+    if (out.some((y) => subsumes(y, x))) continue; // x adds nothing over a kept rule
+    const covered = [];
+    out.forEach((y, i) => { if (subsumes(x, y)) covered.push(i); });
+    if (covered.length) {
+      out[covered[0]] = x; // widen in place at the earliest covered slot
+      for (let k = covered.length - 1; k >= 1; k--) out.splice(covered[k], 1);
+    } else {
+      out.push(x);
+    }
+  }
+  return out;
 }
 
 // Insert a blank line before each given entry in the stringified settings.json,
 // so the allow/deny lists read as topic groups. Blank lines are valid JSON.
 function groupSettings(jsonStr, boundaries) {
   return boundaries.reduce((s, b) => s.replace(`      "${b}"`, `\n      "${b}"`), jsonStr);
+}
+
+// The rule strings that were preceded by a blank line in an existing settings
+// file — i.e. the topic-group breaks the user (or a prior fresh install) chose.
+// JSON.parse discards blank lines, so we recover them from the raw text and
+// re-apply them via groupSettings, preserving the file's grouping across merges.
+function blankPrecededEntries(str) {
+  const set = new Set();
+  const re = /\n[ \t]*\n[ \t]*"((?:[^"\\]|\\.)*)"/g;
+  let m;
+  while ((m = re.exec(str))) set.add(m[1]);
+  return set;
+}
+
+// The entries that start each topic group in settings.json. Shared by the fresh
+// build and the update merge so both paths group identically.
+function settingsBoundaries(pm, kind) {
+  return [
+    'Bash(ls *)', 'Bash(npx tsc *)', pmAllow(pm)[0], ...frontendAllow(kind).slice(0, 1),
+    'Read(**/*.pem)', 'Bash(rm -rf *)', 'Bash(git reset --hard *)', 'Bash(sudo)',
+  ];
 }
 
 // ---------- content builders ----------
@@ -117,9 +192,10 @@ function buildAgents(pm, kind) {
   });
 }
 
-function buildSettings(pm, hook) {
+function buildSettings(pm, hook, kind) {
   const settings = JSON.parse(readTpl('settings.base.json'));
-  settings.permissions.allow.push(...pmAllow(pm));
+  settings.permissions.allow = collapse([...settings.permissions.allow, ...pmAllow(pm), ...frontendAllow(kind)]);
+  settings.permissions.deny = collapse(settings.permissions.deny ?? []);
   if (hook) {
     settings.hooks = {
       PostToolUse: [
@@ -130,26 +206,27 @@ function buildSettings(pm, hook) {
       ],
     };
   }
-  return groupSettings(JSON.stringify(settings, null, 2) + '\n', [
-    'Bash(ls *)', 'Bash(npx tsc *)', pmAllow(pm)[0],
-    'Read(**/*.pem)', 'Bash(rm -rf *)', 'Bash(git reset --hard *)', 'Bash(sudo)',
-  ]);
+  return groupSettings(JSON.stringify(settings, null, 2) + '\n', settingsBoundaries(pm, kind));
 }
 
-// Additive merge: keep everything on disk, add any allow/deny entries the
-// template introduced (e.g. security fixes), add the hook only if absent.
-function mergeSettings(onDiskStr, templateStr, pm) {
+// Additive merge: keep the user's on-disk entries in their existing order, then
+// fold the template's entries in after. `collapse` drops exact duplicates and
+// any rule another already covers (e.g. an on-disk `Bash(yarn lint *)` and
+// `Bash(yarn lint:knip)` both fall away once the template's `Bash(yarn lint*)`
+// arrives), so re-running never grows or repeats the list, and the user's own
+// grouping is preserved. The hook is added only if the file has none.
+function mergeSettings(onDiskStr, templateStr, pm, kind) {
   const cur = JSON.parse(onDiskStr);
   const tpl = JSON.parse(templateStr);
   cur.permissions ??= {};
-  const union = (a = [], b = []) => { const seen = new Set(a); for (const x of b) if (!seen.has(x)) a.push(x); return a; };
-  cur.permissions.allow = union(cur.permissions.allow ?? [], tpl.permissions?.allow ?? []);
-  cur.permissions.deny = union(cur.permissions.deny ?? [], tpl.permissions?.deny ?? []);
+  cur.permissions.allow = collapse([...(cur.permissions.allow ?? []), ...(tpl.permissions?.allow ?? [])]);
+  cur.permissions.deny = collapse([...(cur.permissions.deny ?? []), ...(tpl.permissions?.deny ?? [])]);
   if (!cur.hooks && tpl.hooks) cur.hooks = tpl.hooks;
-  return groupSettings(JSON.stringify(cur, null, 2) + '\n', [
-    'Bash(ls *)', 'Bash(npx tsc *)', pmAllow(pm)[0],
-    'Read(**/*.pem)', 'Bash(rm -rf *)', 'Bash(git reset --hard *)', 'Bash(sudo)',
-  ]);
+  // Preserve the file's own grouping rather than imposing the template's; fall
+  // back to the canonical boundaries if the file had no blank lines at all.
+  const onDiskBlanks = blankPrecededEntries(onDiskStr);
+  const boundaries = onDiskBlanks.size ? [...onDiskBlanks] : settingsBoundaries(pm, kind);
+  return groupSettings(JSON.stringify(cur, null, 2) + '\n', boundaries);
 }
 
 // ---------- plan ----------
@@ -170,7 +247,7 @@ function buildPlan({ pm, kind, hook, idsd }) {
   const plan = [
     { rel: 'CLAUDE.md', content: readTpl('CLAUDE.md'), cls: 'managed' },
     { rel: 'AGENTS.md', content: buildAgents(pm, kind), cls: 'user' },
-    { rel: '.claude/settings.json', content: buildSettings(pm, hook), cls: 'settings' },
+    { rel: '.claude/settings.json', content: buildSettings(pm, hook, kind), cls: 'settings' },
     { rel: 'skills-lock.json', content: readTpl('skills-lock.json'), cls: 'user' },
   ];
   if (idsd) {
@@ -232,7 +309,7 @@ async function applyPlan(plan, manifest, { allowOverwrite, answers }) {
     if (f.cls === 'settings') {
       // Additive merge in every mode — it only ever adds allow/deny entries the
       // template introduced (e.g. security fixes), never removes user entries.
-      const merged = mergeSettings(onDisk, intended, answers.pm);
+      const merged = mergeSettings(onDisk, intended, answers.pm, answers.kind);
       if (merged !== onDisk) { write(f.rel, merged); results.merged.push(f.rel); }
       else results.skipped.push(f.rel);
       hashes[f.rel] = sha256(readFileSync(abs, 'utf8'));

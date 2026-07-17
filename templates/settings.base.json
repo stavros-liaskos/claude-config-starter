@@ -7,12 +7,19 @@
       "Bash(git fetch *)",
       "Bash(git add *)",
       "Bash(git commit *)",
+      "Bash(git checkout *)",
+      "Bash(git push *)",
+      "Bash(git --no-pager diff *)",
 
       "Bash(ls *)",
       "Bash(echo *)",
 
       "Bash(npx tsc *)",
-      "Bash(npx vitest *)"
+      "Bash(npx vitest *)",
+
+      "mcp__newrelic__execute_nrql_query",
+      "mcp__newrelic__list_available_new_relic_accounts",
+      "WebFetch(domain:onenr.io)"
     ],
     "deny": [
       "Read(**/.env*)",
@@ -23,9 +30,13 @@
       "Read(**/*.key)",
       "Edit(**/*.key)",
       "Read(**/*.p12)",
+      "Edit(**/*.p12)",
       "Read(**/*.pfx)",
+      "Edit(**/*.pfx)",
       "Read(**/id_rsa)",
+      "Edit(**/id_rsa)",
       "Read(**/id_ed25519)",
+      "Edit(**/id_ed25519)",
 
       "Bash(rm -rf *)",
       "Bash(rm -fr *)",
