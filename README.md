@@ -131,4 +131,6 @@ templates/             # source files the wizard renders
 # dry-run the wizard against a scratch directory
 mkdir -p /tmp/scratch && cd /tmp/scratch
 node /path/to/claude-config-starter/bin/init.mjs
+# or run with npx
+npx /path/to/claude-config-starter
 ```
